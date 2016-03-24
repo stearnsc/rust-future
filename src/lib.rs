@@ -5,10 +5,11 @@
 use std::boxed::FnBox;
 use std::error::Error;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::fmt;
+use std::iter::FromIterator;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
-use std::fmt;
+use std::sync::{Arc, Mutex};
 
 /// A handle on the result of an asynchronous compution that allows for transformations and
 /// side effects.
@@ -106,6 +107,18 @@ pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterEr
         tx.send(result).unwrap();
     });
     rx.recv().or(Err(DroppedSetterError))
+}
+
+pub fn join2<A, B, E>(fa: Future<A, E>, fb: Future<B, E>) -> Future<(A, B), E>
+    where A: Debug + 'static, B: Debug + 'static, E: Debug + 'static
+{
+    fa.transformf(|result_a| match result_a {
+        Ok(a) => fb.transform(|result_b| match result_b {
+            Ok(b)  => Ok((a, b)),
+            Err(e) => Err(e)
+        }),
+        Err(e) => Future::err(e)
+    })
 }
 
 impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
@@ -364,6 +377,23 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
             } ,
             Err(TryRecvError::Disconnected) => {} //Setter gone; drop callback
         }
+    }
+}
+
+impl<A, E, F> FromIterator<Future<A, E>> for Future<F, E>
+    where F: FromIterator<A>, A: Debug + 'static, E: Debug + 'static, F: Debug + 'static
+{
+    fn from_iter<I: IntoIterator<Item=Future<A,E>>>(iterator: I) -> Self {
+        iterator.into_iter()
+            .fold(Future::value(vec![]), |acc, next| acc.and_thenf(move |mut successes| {
+                next.transform(move |result| match result {
+                    Ok(a) => {
+                        successes.push(a);
+                        Ok(successes)
+                    },
+                    Err(e) => Err(e)
+                })
+            })).map(|successes| successes.into_iter().collect::<F>())
     }
 }
 
