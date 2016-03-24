@@ -1,10 +1,10 @@
 use std::boxed::FnBox;
-use std::cell::{Cell, RefCell};
 use std::error::Error;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
-use std::{fmt, mem};
+use std::sync::mpsc::{Sender, Receiver, TryRecvError};
+use std::fmt;
 
 /// A handle on the result of an asynchronous compution that allows for transformations and
 /// side effects.
@@ -41,18 +41,18 @@ use std::{fmt, mem};
 pub struct Future<A, E>
     where A: Debug + 'static, E: Debug + 'static
 {
-    lock: Arc<Mutex<Cell<bool>>>, //gets set to false when Future or Setter is dropped
-    result: Holder<Box<Result<A, E>>>,
-    callback: Holder<Box<FnBox(Result<A, E>) -> ()>>
+    lock: Arc<Mutex<()>>, //gets set to false when Future or Setter is dropped
+    callback_sender: Sender<Box<FnBox(Result<A, E>) -> ()>>,
+    result_receiver: Receiver<Result<A, E>>
 }
 
 /// The mechanism by which the result of a `Future` is resolved.
 pub struct FutureSetter<A, E>
     where A: Debug + 'static, E: Debug + 'static
 {
-    lock: Arc<Mutex<Cell<bool>>>, //gets set to false when Future or Setter is dropped
-    callback: Holder<Box<FnBox(Result<A, E>) -> ()>>,
-    result: Holder<Box<Result<A, E>>>
+    lock: Arc<Mutex<()>>, //gets set to false when Future or Setter is dropped
+    result_sender: Sender<Result<A, E>>,
+    callback_receiver: Receiver<Box<FnBox(Result<A, E>) -> ()>>
 }
 
 ///
@@ -61,15 +61,17 @@ pub struct FutureSetter<A, E>
 pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
     where A: Debug + 'static, E: Debug + 'static
 {
+    let (callback_tx, callback_rx) = channel();
+    let (result_tx, result_rx) = channel();
     let future = Future {
-        lock: Arc::new(Mutex::new(Cell::new(true))),
-        result: Holder::new(),
-        callback: Holder::new(),
+        lock: Arc::new(Mutex::new(())),
+        callback_sender: callback_tx,
+        result_receiver: result_rx
     };
     let setter = FutureSetter {
         lock: future.lock.clone(),
-        callback: future.callback.clone(),
-        result: future.result.clone()
+        result_sender: result_tx,
+        callback_receiver: callback_rx
     };
     (future, setter)
 }
@@ -349,20 +351,15 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     pub fn resolve<F>(self, f: F)
         where F: FnOnce(Result<A, E>) -> (), F: 'static
     {
-        let alive = &*self.lock.lock().unwrap();
+        let _lock = self.lock.lock().unwrap();
 
-        match self.result.get() {
-            Some(box result)        => f(result),
-            None if alive.get() => self.callback.set(box f),
-            None => {} //Setter has been dropped without setting result; drop callback
-        };
-    }
-}
-
-impl<A: Debug + 'static, E: Debug + 'static> Drop for Future<A, E> {
-    fn drop(&mut self) {
-        let alive = &*self.lock.lock().unwrap();
-        alive.set(false);
+        match self.result_receiver.try_recv() {
+            Ok(result) => f(result),
+            Err(TryRecvError::Empty) =>{
+                let _send_result = self.callback_sender.send(box f);
+            } ,
+            Err(TryRecvError::Disconnected) => {} //Setter gone; drop callback
+        }
     }
 }
 
@@ -371,19 +368,15 @@ impl<A: Debug + 'static, E: Debug + 'static> FutureSetter<A, E> {
     /// transformations associated with the `Future`.
     pub fn set_result<E2: Into<E>>(self, result: Result<A, E2>) {
         let result = result.map_err(E2::into);
-        let alive = &*self.lock.lock().unwrap();
-        match self.callback.get() {
-            Some(callback) => callback(result),
-            None if alive.get() => self.result.set(box result),
-            None => {} //Future has been dropped without setting callback; drop result
-        }
-    }
-}
+        let _lock = self.lock.lock().unwrap();
 
-impl<A: Debug + 'static, E: Debug + 'static> Drop for FutureSetter<A, E> {
-    fn drop(&mut self) {
-        let alive = &*self.lock.lock().unwrap();
-        alive.set(false);
+        match self.callback_receiver.try_recv() {
+            Ok(callback) => callback(result),
+            Err(TryRecvError::Empty) => {
+                let _send_result = self.result_sender.send(result);
+            },
+            Err(TryRecvError::Disconnected) => {} //Future dropped; drop result
+        }
     }
 }
 
@@ -403,37 +396,5 @@ impl fmt::Display for DroppedSetterError {
 impl Error for DroppedSetterError {
     fn description(&self) -> &str {
         "The FutureSetter associated with this Future has been dropped without setting a Result"
-    }
-}
-
-struct Holder<T>(Arc<RefCell<Option<T>>>);
-impl<T> Holder<T> {
-    fn new() -> Holder<T> {
-        Holder(Arc::new(RefCell::new(None)))
-    }
-
-    fn set(&self, t: T) {
-        let Holder(ref cell) = *self;
-        *cell.borrow_mut() = Some(t);
-    }
-
-    fn get(&self) -> Option<T> {
-        let Holder(ref cell) = *self;
-        mem::replace(&mut *cell.borrow_mut(), None)
-    }
-}
-
-impl<T> Debug for Holder<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let Holder(ref cell) = *self;
-        let inner = if cell.borrow().is_some() {"Some(T)"} else {"None"};
-        write!(f, "Holder({})", inner)
-    }
-}
-
-impl<T> Clone for Holder<T> {
-    fn clone(&self) -> Holder<T> {
-        let Holder(ref cell) = *self;
-        Holder(cell.clone())
     }
 }
