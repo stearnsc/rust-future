@@ -2,6 +2,10 @@
 #![feature(box_syntax)]
 #![feature(fnbox)]
 
+mod join;
+
+pub use join::*;
+
 use std::boxed::FnBox;
 use std::error::Error;
 use std::fmt::Debug;
@@ -107,18 +111,6 @@ pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterEr
         tx.send(result).unwrap();
     });
     rx.recv().or(Err(DroppedSetterError))
-}
-
-pub fn join2<A, B, E>(fa: Future<A, E>, fb: Future<B, E>) -> Future<(A, B), E>
-    where A: Debug + 'static, B: Debug + 'static, E: Debug + 'static
-{
-    fa.transformf(|result_a| match result_a {
-        Ok(a) => fb.transform(|result_b| match result_b {
-            Ok(b)  => Ok((a, b)),
-            Err(e) => Err(e)
-        }),
-        Err(e) => Future::err(e)
-    })
 }
 
 impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
