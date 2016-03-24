@@ -41,7 +41,7 @@ use std::fmt;
 pub struct Future<A, E>
     where A: Debug + 'static, E: Debug + 'static
 {
-    lock: Arc<Mutex<()>>, //gets set to false when Future or Setter is dropped
+    lock: Arc<Mutex<()>>,
     callback_sender: Sender<Box<FnBox(Result<A, E>) -> ()>>,
     result_receiver: Receiver<Result<A, E>>
 }
@@ -50,7 +50,7 @@ pub struct Future<A, E>
 pub struct FutureSetter<A, E>
     where A: Debug + 'static, E: Debug + 'static
 {
-    lock: Arc<Mutex<()>>, //gets set to false when Future or Setter is dropped
+    lock: Arc<Mutex<()>>,
     result_sender: Sender<Result<A, E>>,
     callback_receiver: Receiver<Box<FnBox(Result<A, E>) -> ()>>
 }
@@ -147,7 +147,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     ///
-    ///#[derive(Debug)]
+    /// # #[derive(Debug)]
     /// struct MyError(String);
     ///
     /// let f1: Future<(), String> = Future::err(String::from("an error!"));
@@ -197,7 +197,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// use future::Future;
     /// use std::num;
     ///
-    /// #[derive(Debug)]
+    /// # #[derive(Debug)]
     /// enum MyError {
     ///     ParseError(num::ParseIntError)
     /// }
