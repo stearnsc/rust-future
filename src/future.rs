@@ -1,10 +1,10 @@
 use std::boxed::FnBox;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::error::Error;
-use std::sync::Arc;
+use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc::channel;
-use std::sync::Mutex;
-use std::{fmt, mem, ptr};
+use std::{fmt, mem};
 
 /// A handle on the result of an asynchronous compution that allows for transformations and
 /// side effects.
@@ -24,7 +24,7 @@ use std::{fmt, mem, ptr};
 /// use future;
 /// use std::thread;
 ///
-/// let (future, setter) = future::new();
+/// let (future, setter) = future::new::<i64, String>();
 /// thread::spawn(move || {
 ///     // some work here
 ///     let result: Result<i64, String> = Ok(5);
@@ -34,39 +34,43 @@ use std::{fmt, mem, ptr};
 /// future
 ///     .map(|i| i + 5)
 ///     .map_err(|err| err + " more info")
-///     .on_err(|err| println!("Got an err: {}", err))
-///     .resolve(|answer| println!("Answer: {}", answer));
+///     .on_err(|err| println!("Got an err: {:?}", err))
+///     .resolve(|answer| println!("Answer: {:?}", answer));
 /// ```
-pub struct Future<A, E> {
+#[derive(Debug)]
+pub struct Future<A, E>
+    where A: Debug + 'static, E: Debug + 'static
+{
     lock: Arc<Mutex<Cell<bool>>>, //gets set to false when Future or Setter is dropped
-    result: Option<Box<Result<A, E>>>,
-    setter: *mut FutureSetter<A, E>
+    result: Holder<Box<Result<A, E>>>,
+    callback: Holder<Box<FnBox(Result<A, E>) -> ()>>
 }
 
 /// The mechanism by which the result of a `Future` is resolved.
-pub struct FutureSetter<A, E> {
+pub struct FutureSetter<A, E>
+    where A: Debug + 'static, E: Debug + 'static
+{
     lock: Arc<Mutex<Cell<bool>>>, //gets set to false when Future or Setter is dropped
-    callback: Option<Box<FnBox(Result<A, E>) -> ()>>,
-    future: *mut Future<A, E>,
+    callback: Holder<Box<FnBox(Result<A, E>) -> ()>>,
+    result: Holder<Box<Result<A, E>>>
 }
 
 ///
 /// Create a new (`Future`, `FutureSetter`) pair, by which the `FutureSetter` is the mechanism to
 /// resolve the `Future`
 pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
-    where A: 'static, E: 'static
+    where A: Debug + 'static, E: Debug + 'static
 {
-    let mut future = Future {
+    let future = Future {
         lock: Arc::new(Mutex::new(Cell::new(true))),
-        result: None,
-        setter: ptr::null_mut(),
+        result: Holder::new(),
+        callback: Holder::new(),
     };
-    let mut setter = FutureSetter {
+    let setter = FutureSetter {
         lock: future.lock.clone(),
-        callback: None,
-        future: &mut future
+        callback: future.callback.clone(),
+        result: future.result.clone()
     };
-    future.setter = &mut setter;
     (future, setter)
 }
 
@@ -75,7 +79,7 @@ pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
 /// # Panics
 /// This will panic if the FutureSetter is dropped without setting the result.
 pub fn await<A, E>(f: Future<A, E>) -> Result<A, E>
-    where A: 'static, E: 'static
+    where A: Debug + 'static, E: Debug + 'static
 {
     let (tx, rx) = channel();
     f.resolve(move |result| {
@@ -89,7 +93,7 @@ pub fn await<A, E>(f: Future<A, E>) -> Result<A, E>
 /// # Failures
 /// Returns Err(DroppedSetterError) if the FutureSetter goes out of scope without setting the result.
 pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterError>
-    where A: 'static, E: 'static
+    where A: Debug + 'static, E: Debug + 'static
 {
     let (tx, rx) = channel();
     f.resolve(move |result| {
@@ -98,7 +102,7 @@ pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterEr
     rx.recv().or(Err(DroppedSetterError))
 }
 
-impl<A: 'static, E: 'static> Future<A, E> {
+impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// Create a resolved successful `Future` from an `A`
     pub fn value(value: A) -> Future<A, E> {
         Future::done(Ok(value))
@@ -127,7 +131,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// ```
     pub fn map<F, B>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> B, F: 'static,
-              B: 'static
+              B: Debug + 'static
     {
         self.transform(|result| match result {
             Ok(a)  => Ok(f(a)),
@@ -141,6 +145,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     ///
+    ///#[derive(Debug)]
     /// struct MyError(String);
     ///
     /// let f1: Future<(), String> = Future::err(String::from("an error!"));
@@ -148,7 +153,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// ```
     pub fn map_err<F, E2>(self, f: F) -> Future<A, E2>
         where F: FnOnce(E) -> E2, F: 'static,
-              E2: 'static
+              E2: Debug + 'static
     {
         self.transform(|result| match result {
             Err(e) => Err(f(e)),
@@ -162,7 +167,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     ///
-    /// let future: Future<i64, String> = Future::err(String::from("unknown"))
+    /// let future: Future<i64, String> = Future::err(String::from("unknown"));
     /// let handled_future = future.handle(|err| {
     ///     if err == "unknown" {
     ///         -1
@@ -189,23 +194,25 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     /// use std::num;
+    ///
+    /// #[derive(Debug)]
     /// enum MyError {
     ///     ParseError(num::ParseIntError)
     /// }
     ///
-    /// instance From<num::ParseIntError> for MyError
-    /// #{
+    /// impl From<num::ParseIntError> for MyError
+    /// # {
     /// #    fn from(err: num::ParseIntError) -> Self { MyError::ParseError(err) }
-    /// #}
+    /// # }
     ///
-    /// let f1: Future<String, MyError> = Future::value(String::from("four"))
+    /// let f1: Future<String, MyError> = Future::value(String::from("4"));
     /// let f2: Future<i64, MyError> = f1.and_then(|s| s.parse::<i64>());
     /// assert_eq!(4, future::await(f2).unwrap());
     /// ```
     pub fn and_then<F, B, E2>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> Result<B, E2>, F: 'static,
-              E2: Into<E>, E2: 'static,
-              B: 'static
+              E2: Into<E>, E2: Debug + 'static,
+              B: Debug + 'static
     {
         self.transform(|result| match result {
             Ok(a)  => f(a).map_err(E2::into),
@@ -216,7 +223,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// Like `handle`, except when the error transformation could fail.
     pub fn rescue<F, E2>(self, f: F) -> Future<A, E>
         where F: FnOnce(E) -> Result<A, E2>, F: 'static,
-              E2: Into<E>, E2: 'static
+              E2: Into<E>, E2: Debug + 'static
     {
         self.transform(|result| match result {
             Err(e) => f(e).map_err(E2::into),
@@ -228,8 +235,8 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// success and error types if desired.
     pub fn transform<F, B, E2>(self, f: F) -> Future<B, E2>
         where F: FnOnce(Result<A, E>) -> Result<B, E2>, F: 'static,
-              E2: 'static,
-              B: 'static
+              E2: Debug + 'static,
+              B: Debug + 'static
     {
         let (future, setter) = new();
         self.resolve(|result| {
@@ -242,8 +249,8 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// `Result`
     pub fn and_thenf<F, B, E2>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> Future<B, E2>, F: 'static,
-              E2: Into<E>, E2: 'static,
-              B: 'static
+              E2: Into<E>, E2: Debug + 'static,
+              B: Debug + 'static
     {
         self.transformf(|result| match result {
             Ok(a)  => f(a).map_err(E2::into),
@@ -255,7 +262,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// `Result`
     pub fn rescuef<F, E2>(self, f: F) -> Future<A, E>
         where F: FnOnce(E) -> Future<A, E2>, F: 'static,
-              E2: Into<E>, E2: 'static
+              E2: Into<E>, E2: Debug + 'static
     {
         self.transformf(|result| match result {
             Err(e) => f(e).map_err(E2::into),
@@ -267,8 +274,8 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// `Result`
     pub fn transformf<F, B, E2>(self, f: F) -> Future<B, E2>
         where F: FnOnce(Result<A, E>) -> Future<B, E2>, F: 'static,
-              E2: 'static,
-              B: 'static
+              E2: Debug + 'static,
+              B: Debug + 'static
     {
         let (future, setter) = new();
         self.resolve(|result_a| {
@@ -339,55 +346,48 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// Stores the side-effecting `f` to be run once the `Future` completes. This consumes the
     /// `Future`, and is the most common method of consuming the final result of a `Future`
     /// computation.
-    pub fn resolve<F>(mut self, f: F)
+    pub fn resolve<F>(self, f: F)
         where F: FnOnce(Result<A, E>) -> (), F: 'static
     {
         let alive = &*self.lock.lock().unwrap();
 
-        match mem::replace(&mut self.result, None) {
-            Some(result) => {
-                let box result = result;
-                f(result);
-            },
-            None if alive.get() => unsafe {
-                self.setter.as_mut().unwrap().callback = Some(box f);
-            },
+        match self.result.get() {
+            Some(box result)        => f(result),
+            None if alive.get() => self.callback.set(box f),
             None => {} //Setter has been dropped without setting result; drop callback
         };
     }
 }
 
-impl<A, E> Drop for Future<A, E> {
+impl<A: Debug + 'static, E: Debug + 'static> Drop for Future<A, E> {
     fn drop(&mut self) {
         let alive = &*self.lock.lock().unwrap();
         alive.set(false);
     }
 }
 
-impl<A: 'static, E: 'static> FutureSetter<A, E> {
+impl<A: Debug + 'static, E: Debug + 'static> FutureSetter<A, E> {
     /// Sets the result of the associated `Future`. This call will also execute any side-effects or
     /// transformations associated with the `Future`.
-    pub fn set_result<E2: Into<E>>(mut self, result: Result<A, E2>) {
+    pub fn set_result<E2: Into<E>>(self, result: Result<A, E2>) {
         let result = result.map_err(E2::into);
         let alive = &*self.lock.lock().unwrap();
-        match mem::replace(&mut self.callback, None) {
-            Some(callback) => {
-                callback(result);
-            },
-            None if alive.get() => unsafe {
-                self.future.as_mut().unwrap().result = Some(box result);
-            },
+        match self.callback.get() {
+            Some(callback) => callback(result),
+            None if alive.get() => self.result.set(box result),
             None => {} //Future has been dropped without setting callback; drop result
         }
     }
 }
 
-impl<A, E> Drop for FutureSetter<A, E> {
+impl<A: Debug + 'static, E: Debug + 'static> Drop for FutureSetter<A, E> {
     fn drop(&mut self) {
         let alive = &*self.lock.lock().unwrap();
         alive.set(false);
     }
 }
+
+unsafe impl<A: Debug + 'static, E: Debug + 'static> Send for FutureSetter<A, E> {}
 
 /// An Error indicating that the `FutureSetter` for the associated `Future` left scope and was
 /// dropped before setting the result of the `Future`.
@@ -403,5 +403,37 @@ impl fmt::Display for DroppedSetterError {
 impl Error for DroppedSetterError {
     fn description(&self) -> &str {
         "The FutureSetter associated with this Future has been dropped without setting a Result"
+    }
+}
+
+struct Holder<T>(Arc<RefCell<Option<T>>>);
+impl<T> Holder<T> {
+    fn new() -> Holder<T> {
+        Holder(Arc::new(RefCell::new(None)))
+    }
+
+    fn set(&self, t: T) {
+        let Holder(ref cell) = *self;
+        *cell.borrow_mut() = Some(t);
+    }
+
+    fn get(&self) -> Option<T> {
+        let Holder(ref cell) = *self;
+        mem::replace(&mut *cell.borrow_mut(), None)
+    }
+}
+
+impl<T> Debug for Holder<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let Holder(ref cell) = *self;
+        let inner = if cell.borrow().is_some() {"Some(T)"} else {"None"};
+        write!(f, "Holder({})", inner)
+    }
+}
+
+impl<T> Clone for Holder<T> {
+    fn clone(&self) -> Holder<T> {
+        let Holder(ref cell) = *self;
+        Holder(cell.clone())
     }
 }
