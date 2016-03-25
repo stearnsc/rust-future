@@ -8,12 +8,12 @@ pub use join::*;
 
 use std::boxed::FnBox;
 use std::error::Error;
-use std::fmt::Debug;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::mpsc::channel;
 use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 /// A handle on the result of an asynchronous compution that allows for transformations and
 /// side effects.
@@ -48,7 +48,7 @@ use std::sync::{Arc, Mutex};
 /// ```
 #[derive(Debug)]
 pub struct Future<A, E>
-    where A: Debug + 'static, E: Debug + 'static
+    where 'static, E: 'static
 {
     lock: Arc<Mutex<()>>,
     callback_sender: Sender<Box<FnBox(Result<A, E>) -> ()>>,
@@ -57,7 +57,7 @@ pub struct Future<A, E>
 
 /// The mechanism by which the result of a `Future` is resolved.
 pub struct FutureSetter<A, E>
-    where A: Debug + 'static, E: Debug + 'static
+    where A: 'static, E: 'static
 {
     lock: Arc<Mutex<()>>,
     result_sender: Sender<Result<A, E>>,
@@ -68,7 +68,7 @@ pub struct FutureSetter<A, E>
 /// Create a new (`Future`, `FutureSetter`) pair, by which the `FutureSetter` is the mechanism to
 /// resolve the `Future`
 pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
-    where A: Debug + 'static, E: Debug + 'static
+    where A: 'static, E: 'static
 {
     let (callback_tx, callback_rx) = channel();
     let (result_tx, result_rx) = channel();
@@ -90,13 +90,9 @@ pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
 /// # Panics
 /// This will panic if the FutureSetter is dropped without setting the result.
 pub fn await<A, E>(f: Future<A, E>) -> Result<A, E>
-    where A: Debug + 'static, E: Debug + 'static
+    where A: 'static, E: 'static
 {
-    let (tx, rx) = channel();
-    f.resolve(move |result| {
-        tx.send(result).unwrap();
-    });
-    rx.recv().unwrap()
+    await_safe(f).unwrap()
 }
 
 ///
@@ -104,16 +100,23 @@ pub fn await<A, E>(f: Future<A, E>) -> Result<A, E>
 /// # Failures
 /// Returns Err(DroppedSetterError) if the FutureSetter goes out of scope without setting the result.
 pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterError>
-    where A: Debug + 'static, E: Debug + 'static
+    where A: 'static, E: 'static
 {
-    let (tx, rx) = channel();
-    f.resolve(move |result| {
-        tx.send(result).unwrap();
-    });
-    rx.recv().or(Err(DroppedSetterError))
+    f.result_receiver.recv().or(Err(DroppedSetterError))
 }
 
-impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
+/// Execute function `F` in a new thread, returning a `Future` of the result.
+pub fn run<F, A, E>(f: F) -> Future<A, E>
+    where F: FnOnce() -> Result<A, E> + 'static + Send,
+          A: 'static,
+          E: 'static
+{
+    let (future, setter) = new();
+    thread::spawn(move || setter.set_result(f()));
+    future
+}
+
+impl<A: 'static, E: 'static> Future<A, E> {
     /// Create a resolved successful `Future` from an `A`
     pub fn value(value: A) -> Future<A, E> {
         Future::done(Ok(value))
@@ -142,7 +145,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// ```
     pub fn map<F, B>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> B, F: 'static,
-              B: Debug + 'static
+              B: 'static
     {
         self.transform(|result| match result {
             Ok(a)  => Ok(f(a)),
@@ -164,7 +167,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// ```
     pub fn map_err<F, E2>(self, f: F) -> Future<A, E2>
         where F: FnOnce(E) -> E2, F: 'static,
-              E2: Debug + 'static
+              E2: 'static
     {
         self.transform(|result| match result {
             Err(e) => Err(f(e)),
@@ -222,8 +225,8 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// ```
     pub fn and_then<F, B, E2>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> Result<B, E2>, F: 'static,
-              E2: Into<E>, E2: Debug + 'static,
-              B: Debug + 'static
+              E2: Into<E>, E2: 'static,
+              B: 'static
     {
         self.transform(|result| match result {
             Ok(a)  => f(a).map_err(E2::into),
@@ -234,7 +237,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// Like `handle`, except when the error transformation could fail.
     pub fn rescue<F, E2>(self, f: F) -> Future<A, E>
         where F: FnOnce(E) -> Result<A, E2>, F: 'static,
-              E2: Into<E>, E2: Debug + 'static
+              E2: Into<E>, E2: 'static
     {
         self.transform(|result| match result {
             Err(e) => f(e).map_err(E2::into),
@@ -246,8 +249,8 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// success and error types if desired.
     pub fn transform<F, B, E2>(self, f: F) -> Future<B, E2>
         where F: FnOnce(Result<A, E>) -> Result<B, E2>, F: 'static,
-              E2: Debug + 'static,
-              B: Debug + 'static
+              E2: 'static,
+              B: 'static
     {
         let (future, setter) = new();
         self.resolve(|result| {
@@ -260,8 +263,8 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// `Result`
     pub fn and_thenf<F, B, E2>(self, f: F) -> Future<B, E>
         where F: FnOnce(A) -> Future<B, E2>, F: 'static,
-              E2: Into<E>, E2: Debug + 'static,
-              B: Debug + 'static
+              E2: Into<E>, E2: 'static,
+              B: 'static
     {
         self.transformf(|result| match result {
             Ok(a)  => f(a).map_err(E2::into),
@@ -273,7 +276,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// `Result`
     pub fn rescuef<F, E2>(self, f: F) -> Future<A, E>
         where F: FnOnce(E) -> Future<A, E2>, F: 'static,
-              E2: Into<E>, E2: Debug + 'static
+              E2: Into<E>, E2: 'static
     {
         self.transformf(|result| match result {
             Err(e) => f(e).map_err(E2::into),
@@ -285,8 +288,8 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
     /// `Result`
     pub fn transformf<F, B, E2>(self, f: F) -> Future<B, E2>
         where F: FnOnce(Result<A, E>) -> Future<B, E2>, F: 'static,
-              E2: Debug + 'static,
-              B: Debug + 'static
+              E2: 'static,
+              B: 'static
     {
         let (future, setter) = new();
         self.resolve(|result_a| {
@@ -373,7 +376,7 @@ impl<A: Debug + 'static, E: Debug + 'static> Future<A, E> {
 }
 
 impl<A, E, F> FromIterator<Future<A, E>> for Future<F, E>
-    where F: FromIterator<A>, A: Debug + 'static, E: Debug + 'static, F: Debug + 'static
+    where F: FromIterator<A>, A: 'static, E: 'static, F: 'static
 {
     fn from_iter<I: IntoIterator<Item=Future<A,E>>>(iterator: I) -> Self {
         iterator.into_iter()
@@ -389,7 +392,7 @@ impl<A, E, F> FromIterator<Future<A, E>> for Future<F, E>
     }
 }
 
-impl<A: Debug + 'static, E: Debug + 'static> FutureSetter<A, E> {
+impl<A: 'static, E: 'static> FutureSetter<A, E> {
     /// Sets the result of the associated `Future`. This call will also execute any side-effects or
     /// transformations associated with the `Future`.
     pub fn set_result<E2: Into<E>>(self, result: Result<A, E2>) {
@@ -406,7 +409,7 @@ impl<A: Debug + 'static, E: Debug + 'static> FutureSetter<A, E> {
     }
 }
 
-unsafe impl<A: Debug + 'static, E: Debug + 'static> Send for FutureSetter<A, E> {}
+unsafe impl<A: 'static, E: 'static> Send for FutureSetter<A, E> {}
 
 /// An Error indicating that the `FutureSetter` for the associated `Future` left scope and was
 /// dropped before setting the result of the `Future`.
