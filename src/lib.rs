@@ -1,5 +1,6 @@
 #![doc(html_root_url = "https://stearnsc.github.io/rust-future")]
 #![feature(box_syntax)]
+#![feature(box_patterns)]
 #![feature(fnbox)]
 
 mod join;
@@ -7,11 +8,11 @@ mod join;
 pub use join::*;
 
 use std::boxed::FnBox;
+use std::cell::RefCell;
 use std::error::Error;
 use std::fmt;
 use std::iter::FromIterator;
 use std::sync::mpsc::channel;
-use std::sync::mpsc::{Sender, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -46,13 +47,12 @@ use std::thread;
 ///     .on_err(|err| println!("Got an err: {:?}", err))
 ///     .resolve(|answer| println!("Answer: {:?}", answer));
 /// ```
-#[derive(Debug)]
 pub struct Future<A, E>
     where 'static, E: 'static
 {
     lock: Arc<Mutex<()>>,
-    callback_sender: Sender<Box<FnBox(Result<A, E>) -> ()>>,
-    result_receiver: Receiver<Result<A, E>>
+    callback: Arc<RefCell<Option<Box<FnBox(Result<A, E>) -> ()>>>>,
+    result: Arc<RefCell<Option<Box<Result<A, E>>>>>
 }
 
 /// The mechanism by which the result of a `Future` is resolved.
@@ -60,8 +60,8 @@ pub struct FutureSetter<A, E>
     where A: 'static, E: 'static
 {
     lock: Arc<Mutex<()>>,
-    result_sender: Sender<Result<A, E>>,
-    callback_receiver: Receiver<Box<FnBox(Result<A, E>) -> ()>>
+    callback: Arc<RefCell<Option<Box<FnBox(Result<A, E>) -> ()>>>>,
+    result: Arc<RefCell<Option<Box<Result<A, E>>>>>
 }
 
 ///
@@ -70,17 +70,18 @@ pub struct FutureSetter<A, E>
 pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
     where A: 'static, E: 'static
 {
-    let (callback_tx, callback_rx) = channel();
-    let (result_tx, result_rx) = channel();
+    let callback = Arc::new(RefCell::new(None));
+    let result   = Arc::new(RefCell::new(None));
+
     let future = Future {
         lock: Arc::new(Mutex::new(())),
-        callback_sender: callback_tx,
-        result_receiver: result_rx
+        callback: callback.clone(),
+        result: result.clone()
     };
     let setter = FutureSetter {
         lock: future.lock.clone(),
-        result_sender: result_tx,
-        callback_receiver: callback_rx
+        callback: callback,
+        result: result
     };
     (future, setter)
 }
@@ -102,7 +103,9 @@ pub fn await<A, E>(f: Future<A, E>) -> Result<A, E>
 pub fn await_safe<A, E>(f: Future<A, E>) -> Result<Result<A, E>, DroppedSetterError>
     where A: 'static, E: 'static
 {
-    f.result_receiver.recv().or(Err(DroppedSetterError))
+    let (tx, rx) = channel();
+    f.resolve(move |result| tx.send(result).unwrap());
+    rx.recv().map_err(|_| DroppedSetterError)
 }
 
 /// Execute function `F` in a new thread, returning a `Future` of the result.
@@ -132,6 +135,17 @@ impl<A: 'static, E: 'static> Future<A, E> {
         let (future, setter) = new();
         setter.set_result(result);
         future
+    }
+
+    /// Checks whether the result on the Future has been set
+    /// # Examples
+    /// let (future, setter) = future::new::<i64, ()>();
+    /// assert(future.is_resolved() == false);
+    /// setter.set_result(Ok(0));
+    /// assert(future.is_resolved());
+    pub fn is_resolved(&self) -> bool {
+        let _lock = self.lock.lock().unwrap();
+        self.result.borrow().is_some()
     }
 
     /// Transform a successful value when the transformation cannot fail.
@@ -365,12 +379,16 @@ impl<A: 'static, E: 'static> Future<A, E> {
     {
         let _lock = self.lock.lock().unwrap();
 
-        match self.result_receiver.try_recv() {
-            Ok(result) => f(result),
-            Err(TryRecvError::Empty) =>{
-                let _send_result = self.callback_sender.send(box f);
-            } ,
-            Err(TryRecvError::Disconnected) => {} //Setter gone; drop callback
+        let result_set = {
+            self.result.borrow().is_some()
+        };
+
+        if result_set {
+            let box result = Arc::try_unwrap(self.result).ok().unwrap().into_inner().unwrap();
+            f(result);
+        } else {
+            *self.callback.borrow_mut() = Some(box f);
+            Arc::downgrade(&self.callback);
         }
     }
 }
@@ -399,13 +417,22 @@ impl<A: 'static, E: 'static> FutureSetter<A, E> {
         let result = result.map_err(E2::into);
         let _lock = self.lock.lock().unwrap();
 
-        match self.callback_receiver.try_recv() {
-            Ok(callback) => callback(result),
-            Err(TryRecvError::Empty) => {
-                let _send_result = self.result_sender.send(result);
-            },
-            Err(TryRecvError::Disconnected) => {} //Future dropped; drop result
+        let callback_set = {
+            self.callback.borrow().is_some()
+        };
+
+        if callback_set {
+            let callback = Arc::try_unwrap(self.callback).ok().unwrap().into_inner().unwrap();
+            callback(result);
+        } else {
+            *self.result.borrow_mut() = Some(box result);
+            Arc::downgrade(&self.result);
         }
+    }
+
+    pub fn callback_set(&self) -> bool {
+        let _lock = self.lock.lock().unwrap();
+        self.callback.borrow().is_some()
     }
 }
 
