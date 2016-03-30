@@ -403,6 +403,16 @@ impl<A: 'static, E: 'static> Future<A, E> {
     }
 }
 
+impl<A, E, E2> Future<Future<A, E2>, E>
+    where A: 'static, E: 'static,
+          E2: Into<E> + 'static
+{
+    /// Flatten a `Future<Future<A, E2>, E>` into a Future<A, E>, where `E: From<E2>`
+    pub fn flatten(self) -> Future<A, E> {
+        self.and_thenf(|f| f)
+    }
+}
+
 impl<A, E, F> FromIterator<Future<A, E>> for Future<F, E>
     where F: FromIterator<A>, A: 'static, E: 'static, F: 'static
 {
