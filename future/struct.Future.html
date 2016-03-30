@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `Future` struct in crate `future`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, Future">
+
+    <title>future::Future - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../rustdoc.css">
+    <link rel="stylesheet" type="text/css" href="../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <nav class="sidebar">
+        
+        <p class='location'><a href='index.html'>future</a></p><script>window.sidebarCurrent = {name: 'Future', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+    </nav>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press ‘S’ to search, ‘?’ for more options…"
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content struct">
+<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>future</a>::<wbr><a class='struct' href=''>Future</a></span><span class='out-of-band'><span id='render-detail'>
+                   <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">
+                       [<span class='inner'>&#x2212;</span>]
+                   </a>
+               </span><a id='src-347' class='srclink' href='../src/future/src/lib.rs.html#51-57' title='goto source code'>[src]</a></span></h1>
+<pre class='rust struct'>pub struct Future&lt;A, E&gt; <span class='where'>where 'static: , E: 'static</span> {
+    // some fields omitted
+}</pre><div class='docblock'><p>A handle on the result of an asynchronous compution that allows for transformations and
+side effects.</p>
+
+<p><code>Future&lt;A, E&gt;</code> can be thought of as an asynchrounous Result<A, E> with improved transformation
+and side-effect mechanisms. It is intended to be used to chain transformations and then
+eventually consumed. The two mechanisms for final consumption are blocking via <code>future::await</code>
+or <code>future::await_safe</code>, or with a side-effecting callback, added via <code>resolve</code>,
+<code>resolve_success</code>, or <code>resolve_err</code>.</p>
+
+<p>Additionally, side-effects that don&#39;t consume the <code>Future</code> can be added via <code>on_completion</code>,
+<code>on_success</code>, and <code>on_err</code>.</p>
+
+<h1 id='examples' class='section-header'><a href='#examples'>Examples</a></h1>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>future</span>;
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>thread</span>;
+
+<span class='kw'>let</span> (<span class='ident'>future</span>, <span class='ident'>setter</span>) <span class='op'>=</span> <span class='ident'>future</span>::<span class='ident'>new</span>::<span class='op'>&lt;</span><span class='ident'>i64</span>, <span class='ident'>String</span><span class='op'>&gt;</span>();
+<span class='ident'>thread</span>::<span class='ident'>spawn</span>(<span class='kw'>move</span> <span class='op'>||</span> {
+    <span class='comment'>// some work here</span>
+    <span class='kw'>let</span> <span class='ident'>result</span>: <span class='prelude-ty'>Result</span><span class='op'>&lt;</span><span class='ident'>i64</span>, <span class='ident'>String</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='prelude-val'>Ok</span>(<span class='number'>5</span>);
+    <span class='ident'>setter</span>.<span class='ident'>set_result</span>(<span class='ident'>result</span>);
+});
+
+<span class='ident'>future</span>
+    .<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>i</span><span class='op'>|</span> <span class='ident'>i</span> <span class='op'>+</span> <span class='number'>5</span>)
+    .<span class='ident'>map_err</span>(<span class='op'>|</span><span class='ident'>err</span><span class='op'>|</span> <span class='ident'>err</span> <span class='op'>+</span> <span class='string'>&quot; more info&quot;</span>)
+    .<span class='ident'>on_err</span>(<span class='op'>|</span><span class='ident'>err</span><span class='op'>|</span> <span class='macro'>println</span><span class='macro'>!</span>(<span class='string'>&quot;Got an err: {:?}&quot;</span>, <span class='ident'>err</span>))
+    .<span class='ident'>resolve</span>(<span class='op'>|</span><span class='ident'>answer</span><span class='op'>|</span> <span class='macro'>println</span><span class='macro'>!</span>(<span class='string'>&quot;Answer: {:?}&quot;</span>, <span class='ident'>answer</span>));</pre>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><code>impl&lt;A: 'static, E: 'static&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt;</code></h3><div class='impl-items'><h4 id='method.is_resolved' class='method'><code>fn <a href='#method.is_resolved' class='fnname'>is_resolved</a>(&amp;self) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a></code></h4>
+<div class='docblock'><p>Checks whether the result on the Future has been set</p>
+
+<h1 id='examples-1' class='section-header'><a href='#examples-1'>Examples</a></h1>
+<p>let (future, setter) = future::new::<i64, ()>();
+assert(future.is_resolved() == false);
+setter.set_result(Ok(0));
+assert(future.is_resolved());</p>
+</div><h4 id='method.map' class='method'><code>fn <a href='#method.map' class='fnname'>map</a>&lt;F, B&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) -&gt; B, F: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>Transform a successful value when the transformation cannot fail.</p>
+
+<h1 id='examples-2' class='section-header'><a href='#examples-2'>Examples</a></h1>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>future</span>;
+<span class='kw'>use</span> <span class='ident'>future</span>::<span class='ident'>Future</span>;
+
+<span class='kw'>let</span> <span class='ident'>future_int</span>: <span class='ident'>Future</span><span class='op'>&lt;</span><span class='ident'>i64</span>, ()<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>future</span>::<span class='ident'>value</span>(<span class='number'>0</span>);
+<span class='kw'>let</span> <span class='ident'>future_string</span>: <span class='ident'>Future</span><span class='op'>&lt;</span><span class='ident'>String</span>, ()<span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>future_int</span>.<span class='ident'>map</span>(<span class='op'>|</span><span class='ident'>i</span><span class='op'>|</span> <span class='macro'>format</span><span class='macro'>!</span>(<span class='string'>&quot;{}&quot;</span>, <span class='ident'>i</span>));</pre>
+</div><h4 id='method.map_err' class='method'><code>fn <a href='#method.map_err' class='fnname'>map_err</a>&lt;F, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E2&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(E) -&gt; E2, F: 'static, E2: 'static</span></code></h4>
+<div class='docblock'><p>Transform an error value into another.</p>
+
+<h1 id='examples-3' class='section-header'><a href='#examples-3'>Examples</a></h1>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>future</span>;
+<span class='kw'>use</span> <span class='ident'>future</span>::<span class='ident'>Future</span>;
+
+<span class='kw'>struct</span> <span class='ident'>MyError</span>(<span class='ident'>String</span>);
+
+<span class='kw'>let</span> <span class='ident'>f1</span>: <span class='ident'>Future</span><span class='op'>&lt;</span>(), <span class='ident'>String</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>future</span>::<span class='ident'>err</span>(<span class='ident'>String</span>::<span class='ident'>from</span>(<span class='string'>&quot;an error!&quot;</span>));
+<span class='kw'>let</span> <span class='ident'>f2</span>: <span class='ident'>Future</span><span class='op'>&lt;</span>(), <span class='ident'>MyError</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>f1</span>.<span class='ident'>map_err</span>(<span class='op'>|</span><span class='ident'>err_str</span><span class='op'>|</span> <span class='ident'>MyError</span>(<span class='ident'>err_str</span>));</pre>
+</div><h4 id='method.handle' class='method'><code>fn <a href='#method.handle' class='fnname'>handle</a>&lt;F&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(E) -&gt; A, F: 'static</span></code></h4>
+<div class='docblock'><p>Transform an error value into a success value.</p>
+
+<h1 id='examples-4' class='section-header'><a href='#examples-4'>Examples</a></h1>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>future</span>;
+<span class='kw'>use</span> <span class='ident'>future</span>::<span class='ident'>Future</span>;
+
+<span class='kw'>let</span> <span class='ident'>future</span>: <span class='ident'>Future</span><span class='op'>&lt;</span><span class='ident'>i64</span>, <span class='ident'>String</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>future</span>::<span class='ident'>err</span>(<span class='ident'>String</span>::<span class='ident'>from</span>(<span class='string'>&quot;unknown&quot;</span>));
+<span class='kw'>let</span> <span class='ident'>handled_future</span> <span class='op'>=</span> <span class='ident'>future</span>.<span class='ident'>handle</span>(<span class='op'>|</span><span class='ident'>err</span><span class='op'>|</span> {
+    <span class='kw'>if</span> <span class='ident'>err</span> <span class='op'>==</span> <span class='string'>&quot;unknown&quot;</span> {
+        <span class='op'>-</span><span class='number'>1</span>
+    } <span class='kw'>else</span> {
+        <span class='number'>0</span>
+    }
+});
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='op'>-</span><span class='number'>1</span>, <span class='ident'>future</span>::<span class='ident'>await</span>(<span class='ident'>handled_future</span>).<span class='ident'>unwrap</span>());</pre>
+</div><h4 id='method.and_then' class='method'><code>fn <a href='#method.and_then' class='fnname'>and_then</a>&lt;F, B, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;B, E2&gt;, F: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt;, E2: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>Transform a success value when the transformation might fail. Returns an Err<E> if either
+the original computation or the transformation fail. The error type of the transformation
+must have an instance of Into<E> so that the final result has the same error type.</p>
+
+<h1 id='examples-5' class='section-header'><a href='#examples-5'>Examples</a></h1>
+<pre class='rust rust-example-rendered'>
+<span class='kw'>use</span> <span class='ident'>future</span>;
+<span class='kw'>use</span> <span class='ident'>future</span>::<span class='ident'>Future</span>;
+<span class='kw'>use</span> <span class='ident'>std</span>::<span class='ident'>num</span>;
+
+<span class='kw'>enum</span> <span class='ident'>MyError</span> {
+    <span class='ident'>ParseError</span>(<span class='ident'>num</span>::<span class='ident'>ParseIntError</span>)
+}
+
+<span class='kw'>impl</span> <span class='ident'>From</span><span class='op'>&lt;</span><span class='ident'>num</span>::<span class='ident'>ParseIntError</span><span class='op'>&gt;</span> <span class='kw'>for</span> <span class='ident'>MyError</span>
+
+<span class='kw'>let</span> <span class='ident'>f1</span>: <span class='ident'>Future</span><span class='op'>&lt;</span><span class='ident'>String</span>, <span class='ident'>MyError</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>future</span>::<span class='ident'>value</span>(<span class='ident'>String</span>::<span class='ident'>from</span>(<span class='string'>&quot;4&quot;</span>));
+<span class='kw'>let</span> <span class='ident'>f2</span>: <span class='ident'>Future</span><span class='op'>&lt;</span><span class='ident'>i64</span>, <span class='ident'>MyError</span><span class='op'>&gt;</span> <span class='op'>=</span> <span class='ident'>f1</span>.<span class='ident'>and_then</span>(<span class='op'>|</span><span class='ident'>s</span><span class='op'>|</span> <span class='ident'>s</span>.<span class='ident'>parse</span>::<span class='op'>&lt;</span><span class='ident'>i64</span><span class='op'>&gt;</span>());
+<span class='macro'>assert_eq</span><span class='macro'>!</span>(<span class='number'>4</span>, <span class='ident'>future</span>::<span class='ident'>await</span>(<span class='ident'>f2</span>).<span class='ident'>unwrap</span>());</pre>
+</div><h4 id='method.rescue' class='method'><code>fn <a href='#method.rescue' class='fnname'>rescue</a>&lt;F, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(E) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;A, E2&gt;, F: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt;, E2: 'static</span></code></h4>
+<div class='docblock'><p>Like <code>handle</code>, except when the error transformation could fail.</p>
+</div><h4 id='method.transform' class='method'><code>fn <a href='#method.transform' class='fnname'>transform</a>&lt;F, B, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E2&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(<a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;A, E&gt;) -&gt; <a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;B, E2&gt;, F: 'static, E2: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>The most general Future transformation; Transform the result of a <code>Future</code>, changing the
+success and error types if desired.</p>
+</div><h4 id='method.and_thenf' class='method'><code>fn <a href='#method.and_thenf' class='fnname'>and_thenf</a>&lt;F, B, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E2&gt;, F: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt;, E2: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>Like <code>and_then</code>, except when the transformation returns another <code>Future</code> instead of a
+<code>Result</code></p>
+</div><h4 id='method.bind' class='method'><code>fn <a href='#method.bind' class='fnname'>bind</a>&lt;F, B, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E2&gt;, F: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt;, E2: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>Monadic <code>bind</code>; same as <code>and_thenf</code></p>
+</div><h4 id='method.rescuef' class='method'><code>fn <a href='#method.rescuef' class='fnname'>rescuef</a>&lt;F, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(E) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E2&gt;, F: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt;, E2: 'static</span></code></h4>
+<div class='docblock'><p>Like <code>rescue</code>, except when the transformation returns another <code>Future</code> instead of a
+<code>Result</code></p>
+</div><h4 id='method.transformf' class='method'><code>fn <a href='#method.transformf' class='fnname'>transformf</a>&lt;F, B, E2&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E2&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(<a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;A, E&gt;) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;B, E2&gt;, F: 'static, E2: 'static, B: 'static</span></code></h4>
+<div class='docblock'><p>Like <code>transform</code>, except when the transformation returns another <code>Future</code> instead of a
+<code>Result</code></p>
+</div><h4 id='method.on_err' class='method'><code>fn <a href='#method.on_err' class='fnname'>on_err</a>&lt;F&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(&amp;E) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<h4 id='method.on_success' class='method'><code>fn <a href='#method.on_success' class='fnname'>on_success</a>&lt;F&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(&amp;A) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<h4 id='method.on_completion' class='method'><code>fn <a href='#method.on_completion' class='fnname'>on_completion</a>&lt;F&gt;(self, f: F) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(&amp;<a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;A, E&gt;) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<h4 id='method.resolve_success' class='method'><code>fn <a href='#method.resolve_success' class='fnname'>resolve_success</a>&lt;F&gt;(self, f: F) <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(A) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<div class='docblock'><p>Stores the side-effecting <code>f</code> to be run once the <code>Future</code> completes. <code>f</code> will only run if
+the <code>Future</code> resolves successfully; an error result will be dropped. This consumes the
+<code>Future</code></p>
+</div><h4 id='method.resolve_err' class='method'><code>fn <a href='#method.resolve_err' class='fnname'>resolve_err</a>&lt;F&gt;(self, f: F) <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(E) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<div class='docblock'><p>Stores the side-effecting <code>f</code> to be run once the <code>Future</code> completes. <code>f</code> will only run if
+the <code>Future</code> resolves unsuccessfully; a successful result will be dropped. This consumes the
+<code>Future</code></p>
+</div><h4 id='method.resolve' class='method'><code>fn <a href='#method.resolve' class='fnname'>resolve</a>&lt;F&gt;(self, f: F) <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/ops/trait.FnOnce.html' title='core::ops::FnOnce'>FnOnce</a>(<a class='enum' href='https://doc.rust-lang.org/nightly/core/result/enum.Result.html' title='core::result::Result'>Result</a>&lt;A, E&gt;) -&gt; <a class='primitive' href='https://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>, F: 'static</span></code></h4>
+<div class='docblock'><p>Stores the side-effecting <code>f</code> to be run once the <code>Future</code> completes. This consumes the
+<code>Future</code>, and is the most common method of consuming the final result of a <code>Future</code>
+computation.</p>
+</div></div><h3 class='impl'><code>impl&lt;A, E, E2&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;<a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E2&gt;, E&gt; <span class='where'>where A: 'static, E: 'static, E2: <a class='trait' href='https://doc.rust-lang.org/nightly/core/convert/trait.Into.html' title='core::convert::Into'>Into</a>&lt;E&gt; + 'static</span></code></h3><div class='impl-items'><h4 id='method.flatten' class='method'><code>fn <a href='#method.flatten' class='fnname'>flatten</a>(self) -&gt; <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt;</code></h4>
+<div class='docblock'><p>Flatten a <code>Future&lt;Future&lt;A, E2&gt;, E&gt;</code> into a Future<A, E>, where <code>E: From&lt;E2&gt;</code></p>
+</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><code>impl&lt;A, E, F&gt; <a class='trait' href='https://doc.rust-lang.org/nightly/core/iter/trait.FromIterator.html' title='core::iter::FromIterator'>FromIterator</a>&lt;<a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt;&gt; for <a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;F, E&gt; <span class='where'>where F: <a class='trait' href='https://doc.rust-lang.org/nightly/core/iter/trait.FromIterator.html' title='core::iter::FromIterator'>FromIterator</a>&lt;A&gt;, A: 'static, E: 'static, F: 'static</span></code></h3><div class='impl-items'><h4 id='method.from_iter' class='method'><code>fn <a href='https://doc.rust-lang.org/nightly/core/iter/trait.FromIterator.html#tymethod.from_iter' class='fnname'>from_iter</a>&lt;I: <a class='trait' href='https://doc.rust-lang.org/nightly/core/iter/trait.IntoIterator.html' title='core::iter::IntoIterator'>IntoIterator</a>&lt;Item=<a class='struct' href='../future/struct.Future.html' title='future::Future'>Future</a>&lt;A, E&gt;&gt;&gt;(iterator: I) -&gt; Self</code></h4>
+</div></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <aside id="help" class="hidden">
+        <div>
+            <h1 class="hidden">Help</h1>
+
+            <div class="shortcuts">
+                <h2>Keyboard Shortcuts</h2>
+
+                <dl>
+                    <dt>?</dt>
+                    <dd>Show this help dialog</dd>
+                    <dt>S</dt>
+                    <dd>Focus the search field</dd>
+                    <dt>&larrb;</dt>
+                    <dd>Move up in search results</dd>
+                    <dt>&rarrb;</dt>
+                    <dd>Move down in search results</dd>
+                    <dt>&#9166;</dt>
+                    <dd>Go to active search result</dd>
+                </dl>
+            </div>
+
+            <div class="infos">
+                <h2>Search Tricks</h2>
+
+                <p>
+                    Prefix searches with a type followed by a colon (e.g.
+                    <code>fn:</code>) to restrict the search to a given type.
+                </p>
+
+                <p>
+                    Accepted types are: <code>fn</code>, <code>mod</code>,
+                    <code>struct</code>, <code>enum</code>,
+                    <code>trait</code>, <code>type</code>, <code>macro</code>,
+                    and <code>const</code>.
+                </p>
+
+                <p>
+                    Search functions by type signature (e.g.
+                    <code>vec -> usize</code> or <code>* -> vec</code>)
+                </p>
+            </div>
+        </div>
+    </aside>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "future";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../jquery.js"></script>
+    <script src="../main.js"></script>
+    
+    <script defer src="../search-index.js"></script>
+</body>
+</html>
