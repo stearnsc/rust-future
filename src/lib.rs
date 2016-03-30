@@ -1,7 +1,8 @@
 #![doc(html_root_url = "https://stearnsc.github.io/rust-future")]
-#![feature(box_syntax)]
 #![feature(box_patterns)]
+#![feature(box_syntax)]
 #![feature(fnbox)]
+#![feature(type_ascription)]
 
 mod join;
 
@@ -86,6 +87,23 @@ pub fn new<A, E>() -> (Future<A, E>, FutureSetter<A, E>)
     (future, setter)
 }
 
+/// Create a resolved successful `Future` from an `A`
+pub fn value<A: 'static, E: 'static>(value: A) -> Future<A, E> {
+    done(Ok(value))
+}
+
+/// Create a resolved error `Future` from an `E`
+pub fn err<A: 'static, E: 'static>(err: E) -> Future<A, E> {
+    done(Err(err))
+}
+
+/// Create a resolved `Future` from an existing Result
+pub fn done<A: 'static, E: 'static>(result: Result<A, E>) -> Future<A, E> {
+    let (future, setter) = new();
+    setter.set_result(result);
+    future
+}
+
 ///
 /// Blocks until the Future resolves
 /// # Panics
@@ -120,23 +138,6 @@ pub fn run<F, A, E>(f: F) -> Future<A, E>
 }
 
 impl<A: 'static, E: 'static> Future<A, E> {
-    /// Create a resolved successful `Future` from an `A`
-    pub fn value(value: A) -> Future<A, E> {
-        Future::done(Ok(value))
-    }
-
-    /// Create a resolved error `Future` from an `E`
-    pub fn err(err: E) -> Future<A, E> {
-        Future::done(Err(err))
-    }
-
-    /// Create a resolved `Future` from an existing Result
-    pub fn done(result: Result<A, E>) -> Future<A, E> {
-        let (future, setter) = new();
-        setter.set_result(result);
-        future
-    }
-
     /// Checks whether the result on the Future has been set
     /// # Examples
     /// let (future, setter) = future::new::<i64, ()>();
@@ -154,7 +155,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     ///
-    /// let future_int: Future<i64, ()> = Future::value(0);
+    /// let future_int: Future<i64, ()> = future::value(0);
     /// let future_string: Future<String, ()> = future_int.map(|i| format!("{}", i));
     /// ```
     pub fn map<F, B>(self, f: F) -> Future<B, E>
@@ -176,7 +177,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// # #[derive(Debug)]
     /// struct MyError(String);
     ///
-    /// let f1: Future<(), String> = Future::err(String::from("an error!"));
+    /// let f1: Future<(), String> = future::err(String::from("an error!"));
     /// let f2: Future<(), MyError> = f1.map_err(|err_str| MyError(err_str));
     /// ```
     pub fn map_err<F, E2>(self, f: F) -> Future<A, E2>
@@ -195,7 +196,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// use future;
     /// use future::Future;
     ///
-    /// let future: Future<i64, String> = Future::err(String::from("unknown"));
+    /// let future: Future<i64, String> = future::err(String::from("unknown"));
     /// let handled_future = future.handle(|err| {
     ///     if err == "unknown" {
     ///         -1
@@ -233,7 +234,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     /// #    fn from(err: num::ParseIntError) -> Self { MyError::ParseError(err) }
     /// # }
     ///
-    /// let f1: Future<String, MyError> = Future::value(String::from("4"));
+    /// let f1: Future<String, MyError> = future::value(String::from("4"));
     /// let f2: Future<i64, MyError> = f1.and_then(|s| s.parse::<i64>());
     /// assert_eq!(4, future::await(f2).unwrap());
     /// ```
@@ -282,7 +283,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     {
         self.transformf(|result| match result {
             Ok(a)  => f(a).map_err(E2::into),
-            Err(e) => Future::done(Err(e))
+            Err(e) => done(Err(e))
         })
     }
 
@@ -294,7 +295,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
     {
         self.transformf(|result| match result {
             Err(e) => f(e).map_err(E2::into),
-            Ok(a) => Future::done(Ok(a))
+            Ok(a) => done(Ok(a))
         })
     }
 
@@ -384,7 +385,7 @@ impl<A: 'static, E: 'static> Future<A, E> {
         };
 
         if result_set {
-            let box result = Arc::try_unwrap(self.result).ok().unwrap().into_inner().unwrap();
+            let box result = unwrap_unsafe(self.result);
             f(result);
         } else {
             *self.callback.borrow_mut() = Some(box f);
@@ -398,7 +399,7 @@ impl<A, E, F> FromIterator<Future<A, E>> for Future<F, E>
 {
     fn from_iter<I: IntoIterator<Item=Future<A,E>>>(iterator: I) -> Self {
         iterator.into_iter()
-            .fold(Future::value(vec![]), |acc, next| acc.and_thenf(move |mut successes| {
+            .fold(value(vec![]), |acc, next| acc.and_thenf(move |mut successes| {
                 next.transform(move |result| match result {
                     Ok(a) => {
                         successes.push(a);
@@ -422,7 +423,7 @@ impl<A: 'static, E: 'static> FutureSetter<A, E> {
         };
 
         if callback_set {
-            let callback = Arc::try_unwrap(self.callback).ok().unwrap().into_inner().unwrap();
+            let callback = unwrap_unsafe(self.callback);
             callback(result);
         } else {
             *self.result.borrow_mut() = Some(box result);
@@ -452,5 +453,91 @@ impl fmt::Display for DroppedSetterError {
 impl Error for DroppedSetterError {
     fn description(&self) -> &str {
         "The FutureSetter associated with this Future has been dropped without setting a Result"
+    }
+}
+
+/// Unwraps an `Arc<RefCell<Option<A>>>` into an `A`. This assumes the `Arc` has only
+/// one strong reference and that the `Option` is `Some`.
+fn unwrap_unsafe<A>(v: Arc<RefCell<Option<A>>>) -> A {
+    match Arc::try_unwrap(v) {
+        Ok(cell) => cell.into_inner().expect("Value was not set. This is a bug!"),
+        Err(_) => panic!("Multiple strong references held to arc; this is a bug!")
+    }
+}
+
+mod test {
+    use std::cell::Cell;
+    use std::sync::Arc;
+    use super::*;
+
+    #[test]
+    fn await_resolves_for_finished_future() {
+        let f: Future<i64, ()> = value(5);
+        assert_eq!(await(f).unwrap(), 5);
+    }
+
+    #[test]
+    fn resolve_executes_for_finished_future() {
+        let f: Future<(), String> = err(String::from("An error"));
+        let check = Arc::new(Cell::new(false));
+        let check2 = check.clone();
+        f.resolve(move |result| match result {
+            Ok(_) => panic!("Unexpected value"),
+            Err(_) => check2.set(true)
+        });
+        assert_eq!(check.get(), true);
+    }
+
+    #[test]
+    fn resolving_on_setter_resolves_future() {
+        let (future, setter) = new::<(), ()>();
+        assert_eq!(future.is_resolved(), false);
+        setter.set_result(Ok(()): Result<(), ()>);
+        assert_eq!(future.is_resolved(), true);
+        assert_eq!(await(future), Ok(()));
+    }
+
+    #[test]
+    fn transformations_are_respected_when_resolved() {
+        let f = value::<i64, String>(0)
+            .map(|n| n + 1)
+            .and_then(|n| Ok(n + 1): Result<i64, String>)
+            .transform(|r| match r {
+                Ok(n) => Err(format!("{}", n + 1)),
+                Err(_) => panic!("Expected Ok, was Err")
+            })
+            .rescue(|n| Err(format!("{}", n.parse::<i64>().unwrap() + 1)))
+            .handle(|n| n.parse::<i64>().unwrap() + 1)
+            .and_thenf(|n| err(format!("{}", n + 1)): Future<i64, String>)
+            .transformf(|r| match r {
+                Ok(_) => panic!("Expected Err, was Ok"),
+                Err(n) => err(format!("{}", n.parse::<i64>().unwrap() + 1))
+            })
+            .rescuef(|n| value(n.parse::<i64>().unwrap() + 1): Future<i64, String>);
+
+        assert_eq!(await(f), Ok(8));
+    }
+
+    #[test]
+    fn transformations_are_respected_when_not_resolved() {
+        let (future, setter) = new::<i64, String>();
+        let transformed_future = future
+            .map(|n| n + 1)
+            .and_then(|n| Ok(n + 1): Result<i64, String>)
+            .transform(|r| match r {
+                Ok(n) => Err(format!("{}", n + 1)),
+                Err(_) => panic!("Expected Ok, was Err")
+            })
+            .rescue(|n| Err(format!("{}", n.parse::<i64>().unwrap() + 1)))
+            .handle(|n| n.parse::<i64>().unwrap() + 1)
+            .and_thenf(|n| err(format!("{}", n + 1)): Future<i64, String>)
+            .transformf(|r| match r {
+                Ok(_) => panic!("Expected Err, was Ok"),
+                Err(n) => err(format!("{}", n.parse::<i64>().unwrap() + 1))
+            })
+            .rescuef(|n| value(n.parse::<i64>().unwrap() + 1): Future<i64, String>);
+
+        setter.set_result(Ok(0): Result<i64, String>);
+        assert_eq!(await(transformed_future), Ok(8));
     }
 }
