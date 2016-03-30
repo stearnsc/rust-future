@@ -503,19 +503,20 @@ mod test {
             .map(|n| n + 1)
             .and_then(|n| Ok(n + 1): Result<i64, String>)
             .transform(|r| match r {
-                Ok(n) => Err(format!("{}", n + 1)),
+                Ok(n) => Err((n + 1).to_string()),
                 Err(_) => panic!("Expected Ok, was Err")
             })
-            .rescue(|n| Err(format!("{}", n.parse::<i64>().unwrap() + 1)))
-            .handle(|n| n.parse::<i64>().unwrap() + 1)
-            .and_thenf(|n| err(format!("{}", n + 1)): Future<i64, String>)
+            .map_err(|s| incr_string(s))
+            .rescue(|s| Err(incr_string(s)))
+            .handle(|s| s.parse::<i64>().unwrap() + 1)
+            .and_thenf(|n| err((n + 1).to_string()): Future<i64, String>)
             .transformf(|r| match r {
                 Ok(_) => panic!("Expected Err, was Ok"),
-                Err(n) => err(format!("{}", n.parse::<i64>().unwrap() + 1))
+                Err(s) => err(incr_string(s))
             })
             .rescuef(|n| value(n.parse::<i64>().unwrap() + 1): Future<i64, String>);
 
-        assert_eq!(await(f), Ok(8));
+        assert_eq!(await(f), Ok(9));
     }
 
     #[test]
@@ -525,19 +526,24 @@ mod test {
             .map(|n| n + 1)
             .and_then(|n| Ok(n + 1): Result<i64, String>)
             .transform(|r| match r {
-                Ok(n) => Err(format!("{}", n + 1)),
+                Ok(n) => Err((n + 1).to_string()),
                 Err(_) => panic!("Expected Ok, was Err")
             })
-            .rescue(|n| Err(format!("{}", n.parse::<i64>().unwrap() + 1)))
-            .handle(|n| n.parse::<i64>().unwrap() + 1)
-            .and_thenf(|n| err(format!("{}", n + 1)): Future<i64, String>)
+            .map_err(|s| incr_string(s))
+            .rescue(|s| Err(incr_string(s)))
+            .handle(|s| s.parse::<i64>().unwrap() + 1)
+            .and_thenf(|n| err((n + 1).to_string()): Future<i64, String>)
             .transformf(|r| match r {
                 Ok(_) => panic!("Expected Err, was Ok"),
-                Err(n) => err(format!("{}", n.parse::<i64>().unwrap() + 1))
+                Err(s) => err(incr_string(s))
             })
             .rescuef(|n| value(n.parse::<i64>().unwrap() + 1): Future<i64, String>);
 
         setter.set_result(Ok(0): Result<i64, String>);
-        assert_eq!(await(transformed_future), Ok(8));
+        assert_eq!(await(transformed_future), Ok(9));
+    }
+
+    fn incr_string(s: String) -> String {
+        format!("{}", s.parse::<i64>().unwrap() + 1)
     }
 }
