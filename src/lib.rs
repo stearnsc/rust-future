@@ -287,6 +287,15 @@ impl<A: 'static, E: 'static> Future<A, E> {
         })
     }
 
+    /// Monadic `bind`; same as `and_thenf`
+    pub fn bind<F, B, E2>(self, f: F) -> Future<B, E>
+        where F: FnOnce(A) -> Future<B, E2>, F: 'static,
+              E2: Into<E>, E2: 'static,
+              B: 'static
+    {
+        self.and_thenf(f)
+    }
+
     /// Like `rescue`, except when the transformation returns another `Future` instead of a
     /// `Result`
     pub fn rescuef<F, E2>(self, f: F) -> Future<A, E>
